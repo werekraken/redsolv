@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #
-# gethostlatency  Show latency for getaddrinfo/gethostbyname[2] calls.
-#                 For Linux, uses BCC, eBPF. Embedded C.
+# getaddrinfo_red  Time and inspect getaddrinfo calls.
+#                  For Linux, uses BCC, eBPF. Embedded C.
 #
 # This can be useful for identifying DNS latency, by identifying which
 # remote host name lookups were slow, and by how much.
@@ -14,6 +14,7 @@
 #
 # 28-Jan-2016    Brendan Gregg   Created this.
 # 30-Mar-2016   Allan McAleavy updated for BPF_PERF_OUTPUT
+# 15-Sep-2026    Matt Cover      Extended this.
 
 from __future__ import print_function
 from bcc import BPF
@@ -21,11 +22,11 @@ from time import strftime
 import argparse
 
 examples = """examples:
-    ./gethostlatency           # time getaddrinfo/gethostbyname[2] calls
-    ./gethostlatency -p 181    # only trace PID 181
+    ./getaddrinfo_red           # time and inspect getaddrinfo calls
+    ./getaddrinfo_red -p 181    # only trace PID 181
 """
 parser = argparse.ArgumentParser(
-    description="Show latency for getaddrinfo/gethostbyname[2] calls",
+    description="Time and inspect getaddrinfo calls",
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog=examples)
 parser.add_argument("-p", "--pid", help="trace this PID only", type=int,
@@ -50,6 +51,7 @@ struct data_t {
     u32 pid;
     u64 delta;
     char comm[TASK_COMM_LEN];
+    int gai_errno;
     char host[80];
 };
 
@@ -91,8 +93,10 @@ int do_return(struct pt_regs *ctx) {
 
     bpf_probe_read_kernel(&data.comm, sizeof(data.comm), valp->comm);
     bpf_probe_read_kernel(&data.host, sizeof(data.host), (void *)valp->host);
+
     data.pid = valp->pid;
     data.delta = tsp - valp->ts;
+    data.gai_errno = PT_REGS_RC(ctx);
     events.perf_submit(ctx, &data, sizeof(data));
     start.delete(&tid);
     return 0;
@@ -104,24 +108,17 @@ if args.ebpf:
 
 b = BPF(text=bpf_text)
 b.attach_uprobe(name="c", sym="getaddrinfo", fn_name="do_entry", pid=args.pid)
-b.attach_uprobe(name="c", sym="gethostbyname", fn_name="do_entry",
-                pid=args.pid)
-b.attach_uprobe(name="c", sym="gethostbyname2", fn_name="do_entry",
-                pid=args.pid)
 b.attach_uretprobe(name="c", sym="getaddrinfo", fn_name="do_return",
-                   pid=args.pid)
-b.attach_uretprobe(name="c", sym="gethostbyname", fn_name="do_return",
-                   pid=args.pid)
-b.attach_uretprobe(name="c", sym="gethostbyname2", fn_name="do_return",
                    pid=args.pid)
 
 # header
-print("%-9s %-7s %-16s %10s %s" % ("TIME", "PID", "COMM", "LATms", "HOST"))
+print("%-9s %-6s %-16s %10s %-9s %s" % ("TIME", "PID", "COMM", "LATms", "GAI_ERRNO", "HOST"))
 
 def print_event(cpu, data, size):
     event = b["events"].event(data)
-    print("%-9s %-7d %-16s %10.2f %s" % (strftime("%H:%M:%S"), event.pid,
+    print("%-9s %-6d %-16s %10.2f %-9i %s" % (strftime("%H:%M:%S"), event.pid,
         event.comm.decode('utf-8', 'replace'), (float(event.delta) / 1000000),
+        event.gai_errno,
         event.host.decode('utf-8', 'replace')))
 
 # loop with callback to print_event
