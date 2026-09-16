@@ -2,7 +2,10 @@ CC = gcc
 CFLAGS = -Wall -Wcast-align -Wcast-qual -Wimplicit -Wpointer-arith -Wredundant-decls -Wreturn-type -Wshadow
 PREFIX = /usr/local
 
-all: gethostbyname gethostbyname2
+all: getaddrinfo gethostbyname gethostbyname2
+
+getaddrinfo: getaddrinfo.c
+	$(CC) $(CFLAGS) -o $@ $<
 
 gethostbyname: gethostbyname.c
 	$(CC) $(CFLAGS) -o $@ $<
@@ -12,15 +15,16 @@ gethostbyname2: gethostbyname
 
 .PHONY: clean
 clean:
-	rm -f gethostbyname gethostbyname2
+	rm -f getaddrinfo gethostbyname gethostbyname2
 
 .PHONY: install
-install: gethostbyname
+install: getaddrinfo gethostbyname
 	mkdir -p $(DESTDIR)$(PREFIX)/bin
 	install $^ $(DESTDIR)$(PREFIX)/bin/
-	ln -sf $^ $(DESTDIR)$(PREFIX)/bin/gethostbyname2
+	ln -sf gethostbyname $(DESTDIR)$(PREFIX)/bin/gethostbyname2
 
 .PHONY: uninstall
 uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/getaddrinfo
 	rm -f $(DESTDIR)$(PREFIX)/bin/gethostbyname
 	rm -f $(DESTDIR)$(PREFIX)/bin/gethostbyname2
